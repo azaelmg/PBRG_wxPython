@@ -11,6 +11,7 @@ import os
 import glob
 import re
 import functools
+import math
 import csv
 from PIL import Image
 import wx
@@ -131,22 +132,47 @@ class RegistrationFrame ( wx.Frame ):
         self.uncoded_files = []
         self.file_btn_list = []
         self.coded_count = 0
+
         self.size_dict = {
-            "coding":{
+            "CODING":{
                 "Infantil":"IN", "Pasaporte":"PA", "Credencial Ovalada":"CR",
                 "Visa Americana":"VI", "Diploma":"DI", "Título":"TI"
             },
-            "decoding":{
+            "DECODING":{
                 "IN":"INFANTIL", "PA":"PASAPORTE", "CR":"CREDENCIAL OVALO",
                 "VI":"VISA AMERICANA", "DI":"DIPLOMA", "TI":"TÍTULO"
             }
         }
         self.color_dict = {
-            "coding":{
+            "CODING":{
                 "Color":"C", "Blanco y Negro":"B"
             },
-            "decoding":{
+            "DECODING":{
                 "C":"COLOR", "B":"BYN"
+            }
+        }
+        self.costs_dict = {
+            # MIN -> Minimum photo quantity (order).
+            # DIV -> Numeric validator (Photo Quantity must be divisible by this value.)
+            # CPP -> Cost per photo.
+            # CPO -> Cost per order.
+            "IN":{
+                "MIN":6, "DIV":6, "CPP":0, "CPO":70.00
+            },
+            "PA":{
+                "MIN":5, "DIV":5, "CPP":23, "CPO":115.00
+            },
+            "CR":{
+                "MIN":4, "DIV":4, "CPP":28.75, "CPO":115.00
+            },
+            "VI":{
+                "MIN":3, "DIV":3, "CPP":0, "CPO":115.00
+            },
+            "DI":{
+                "MIN":4, "DIV":2, "CPP":43.75, "CPO":175.00
+            },
+            "TI":{
+                "MIN":4, "CPP":55.00, "CPO":220.00
             }
         }
         self.record_file_path = ""
@@ -158,7 +184,7 @@ class RegistrationFrame ( wx.Frame ):
     def on_directory_changed(self, event):
         """
         Selected directory has changed.
-        Verifies if the new directory is valid for registration.
+        Verifies if the new directory name is valid for registration.
         If the selected dir is accepted, scanning of the dir contents is called.
         """
         self.selected_dir_path = self.rf_dirctrl.GetPath()
@@ -168,42 +194,74 @@ class RegistrationFrame ( wx.Frame ):
         if folder_match is  None:
             # Folder's name is invalid.
             # Rename folder if the error in the folder's name is minimal.
+            ###########################################################################
+            ## TO DOOOOOOOOOOOOOOOOOOOOOOOOOOO
+            ###########################################################################
             print("The folder's name is not viable for registration.\n")
         else:
              # Folder's name is valid.
             print(f"The folder's name {self.selected_dir_name} is viable for registration.\n")
+            # Date doesn't change unless folder changes
+            # so we can use the record date as a global variable.
             aux_date = wx.DateTime()
             aux_date.ParseDate(self.selected_dir_name)
             self.record_date = str(aux_date.GetDateOnly()).split(" ")[0]
             print(f"Date of selected folder: {self.record_date}\n")
 
-            self.record_file_path = self.selected_dir_path + "\\" + self.selected_dir_name.upper() + ".csv"
+            self.record_file_path = (
+                self.selected_dir_path + "\\" +
+                self.selected_dir_name.upper() + ".csv"
+            )
             self.scan_directory()
 
     def on_register(self, event):
         """
         Check numeration of files already coded and generate new key/s based on them.
         """
-        # Get selected files to register.
-        for file_btn in self.file_btn_list:
-            if file_btn.GetValue():
-                file_to_process = file_btn.GetLabel()
-                prev_file_path = self.selected_dir_path + "\\" + file_to_process
-                if len(self.coded_files) == 0:
-                    self.coded_count = 0
+        photo_quantity = int(self.rf_quantity_ch.GetStringSelection())
+        photo_size = self.rf_size_rbox.GetStringSelection()
+
+        # Verify integrity of the record to be processed.
+        if not self.verify_record(photo_quantity, photo_size):
+            print("Incorrect record data.")
+        else:
+            # Get selected files to register.
+            something_toggled = False
+            for file_btn in self.file_btn_list:
+                if not file_btn.GetValue():
+                    pass
                 else:
-                    self.coded_count = len(self.coded_files)
+                    something_toggled = True
+                    prev_file_path = self.selected_dir_path + "\\" + file_btn.GetLabel()
+                    if len(self.coded_files) == 0:
+                        self.coded_count = 0
+                    else:
+                        self.coded_count = len(self.coded_files)
+                        # Take into account when a coded file is deleted
+                        ###########################################################################
+                        ## TO DOOOOOOOOOOOOOOOOOOOOOOOOOOO
+                        ###########################################################################
 
-                new_file_name = self.generate_code()
-                new_file_path = self.selected_dir_path + "\\" + new_file_name + ".JPG"
-                #os.rename(prev_file_path, new_file_path)
+                    new_file_name = self.generate_code(photo_quantity, photo_size)
+                    new_file_path = self.selected_dir_path + "\\" + new_file_name
 
-                self.write_record(new_file_name)
+                    os.rename(prev_file_path, new_file_path)
+                    # Verify renamed file exists
+                    if not os.path.isfile(new_file_path):
+                        # Processed file NOT FOUND.
+                        ###########################################################################
+                        ## TO DOOOOOOOOOOOOOOOOOOOOOOOOOOO
+                        ###########################################################################
+                        break
+                    else:
+                        self.write_record(new_file_name)
+                        self.coded_files.append(new_file_name)
 
-                self.coded_files.append(new_file_path)
-
-        self.clear_file_display()
-        self.scan_directory()
+            if something_toggled:
+                self.clear_file_display()
+                self.scan_directory()
+            else:
+                print("No files selected.\n")
 
     def on_ignore(self, event):
         """
@@ -266,14 +324,13 @@ class RegistrationFrame ( wx.Frame ):
         else:
             return functools.reduce(type(image).transpose, seq, image)
 
-    def generate_bitmap_buttons(self, img_list):
+    def generate_bitmap_buttons(self):
         """
-        Takes a list of uncoded files and displays them on a scrolled window as
-        Toggle buttons.
+        Generates toggle buttons with Bitmaps on them of the uncoded files found in the scan.
         """
         self.clear_file_display()
         display_gridbox = self.file_display_swindow.GetSizer()
-        for filename in  img_list:
+        for filename in self.uncoded_files:
             file_path = self.selected_dir_path + "\\" + filename
             pil_img = Image.open(file_path)
             pil_img = self.image_transpose_exif(pil_img)
@@ -285,8 +342,7 @@ class RegistrationFrame ( wx.Frame ):
                 print(f"{excn}\nImage being processed as PNG: {file_path}\n")
                 bytes_img = io.BytesIO()
                 pil_img.save(bytes_img, format="PNG")
-                bytes_img = bytes_img.getvalue()
-                bmp = wx.Bitmap.FromPNGData(bytes_img)
+                bmp = wx.Bitmap.FromPNGData(bytes_img.getvalue())
 
             btn = wx.ToggleButton(
                 self.file_display_swindow, wx.ID_ANY, filename, wx.DefaultPosition,
@@ -314,7 +370,7 @@ class RegistrationFrame ( wx.Frame ):
 
         print(f"Path being scanned:\n{self.selected_dir_path}\n")
 
-        print(f"The selected folder's name is:\n{self.selected_dir_name}\n")
+        print(f"Folder being scanned:\n{self.selected_dir_name}\n")
 
         for walk_tuple in os.walk(self.selected_dir_path):
             if walk_tuple[0] != self.selected_dir_path:
@@ -324,10 +380,10 @@ class RegistrationFrame ( wx.Frame ):
 
             # Get all jpg files in selected folder ignoring hidden files.
             os.chdir(walk_tuple[0])
-            filenames = glob.glob("*.JPG")
+            #filenames = glob.glob("*.JPG")
 
             # Check for already coded files in folder.
-            for filename in filenames:
+            for filename in glob.glob("*.JPG"):
                 if re.search(self.file_name_pattern, filename):
                     self.coded_files.append(filename)
                 else:
@@ -342,24 +398,54 @@ class RegistrationFrame ( wx.Frame ):
             if len(self.uncoded_files) == 0:
                 print("All the files in this folder have been processed already.")
             else:
-                self.generate_bitmap_buttons(self.uncoded_files)
+                self.generate_bitmap_buttons()
 
-    def generate_code(self):
+    def verify_record(self, photo_quantity, photo_size):
+        """
+        Verifies the record to be archived meets the logical requirements of it's nature.
+        """
+        print("Verifying record parameters...\n")
+        verified = False
+        if photo_size == "Infantil":
+            if (photo_quantity >= self.costs_dict["IN"]["MIN"] and
+                photo_quantity % self.costs_dict["IN"]["DIV"] == 0):
+                verified = True
+
+        elif photo_size == "Pasaporte":
+            if (photo_quantity >= self.costs_dict["PA"]["MIN"] and
+                photo_quantity % self.costs_dict["PA"]["DIV"] == 0):
+                verified = True
+
+        elif photo_size == "Credencial Ovalada":
+            if (photo_quantity >= self.costs_dict["CR"]["MIN"] and
+                photo_quantity % self.costs_dict["CR"]["DIV"] == 0):
+                verified = True
+
+        elif photo_size == "Visa Americana":
+            if (photo_quantity >= self.costs_dict["VI"]["MIN"] and
+                photo_quantity % self.costs_dict["VI"]["DIV"] == 0):
+                verified = True
+
+        elif photo_size == "Diploma" or photo_size == "Título":
+            if (photo_quantity >= self.costs_dict["DI"]["MIN"] and
+                photo_quantity % self.costs_dict["DI"]["DIV"] == 0):
+                verified = True
+
+        return verified
+
+    def generate_code(self, photo_quantity, photo_size):
         """
         Generates a new coded name for a file.
         """
         # Obtain record values.
-        filename_param = []
-        filename = ""
         self.coded_count += 1
-        # Client enumeration int.
-        filename_param.append(str(self.coded_count))
-        # Photo quantity.
-        filename_param.append(self.rf_quantity_ch.GetStringSelection())
-        # Photo size.
-        filename_param.append(self.size_dict["coding"][self.rf_size_rbox.GetStringSelection()])
-        # Photo color.
-        filename_param.append(self.color_dict["coding"][self.rf_color_rbox.GetStringSelection()])
+        filename_param = [
+            str(self.coded_count),
+            str(photo_quantity),
+            self.size_dict["CODING"][photo_size],
+            self.color_dict["CODING"][self.rf_color_rbox.GetStringSelection()],
+            ".JPG"
+        ]
         filename = "_".join(filename_param)
         return filename
 
@@ -367,26 +453,44 @@ class RegistrationFrame ( wx.Frame ):
         """
         Writes the decoded information from a processed file to a csv file.
         """
-        # Generate the concept by decoding the filename.
-        decoded_name_param = []
+        # Generate the concept by DECODING the filename.
         name_param = new_file_name.split("_")
-        decoded_name_param.append(name_param[1])
-        decoded_name_param.append(self.color_dict["decoding"][name_param[3]])
-        decoded_name_param.append(self.size_dict["decoding"][name_param[2]])
+        photo_quantity = name_param[1]
+        coded_size = name_param[2]
+        coded_color = name_param[3]
+
+        decoded_name_param = [
+            photo_quantity,
+            self.color_dict["DECODING"][coded_color],
+            self.size_dict["DECODING"][coded_size]
+        ]
         print(f"Filename {new_file_name} has been decoded:\n{decoded_name_param}\n")
         concept = " ".join(decoded_name_param)
         print(f"Concept cell content generated:\n{concept}\n")
 
-        # Calculate the amount with the decoded filename.
+        # Calculate the amount.
+        ind_cost = self.costs_dict[coded_size]["CPP"]
+        if ind_cost > 0:
+            amount =  float(photo_quantity) * float(ind_cost)
+            # Round cost to be divisible by 5.
+            if amount % 5 != 0:
+                amount = math.ceil(amount)
+                amount = amount + abs(math.remainder(amount,5))
+        else:
+            amount = (
+                float(photo_quantity) /
+                float(self.costs_dict[coded_size]["MIN"]) *
+                self.costs_dict[coded_size]["CPO"]
+            )
+        amount = "$" + str(amount)
+        print(f"Amount cell content generated:\n{amount}\n")
+        # CSV Accounting template:
+        # _,      MES + " " + AÑO
+        # _,  ESTUDIO FOTOGRÁFICO OMEGA
+        # _,FECHA,        CONCEPTO,               IMPORTE
+        # _,DD/MM/AAA,    6 COLOR INFANTIL,       $70.00
+        # _,_,            VENTA TOTAL DEL DÍA,    $70.00
 
-        """
-        CSV Accounting template:
-        _,      MES + " " + AÑO
-        _,  ESTUDIO FOTOGRÁFICO OMEGA
-        _,FECHA,        CONCEPTO,               IMPORTE
-        _,DD/MM/AAA,    6 COLOR INFANTIL,       $70.00MX
-        _,_,            VENTA TOTAL DEL DÍA,    $70.00MX
-        """
         # Check if csv file is already created.
         if os.path.isfile(self.record_file_path):
             # Record file already exists.
@@ -397,7 +501,7 @@ class RegistrationFrame ( wx.Frame ):
 
         record_file = open(f"{self.selected_dir_name}.csv", mode=mode, newline="")
         record_file_writer = csv.writer(record_file, delimiter=",")
-        record_file_writer.writerow([self.record_date, concept, "$fucking money"])
+        record_file_writer.writerow([self.record_date, concept, amount])
         record_file.close()
 
     def __del__( self ):
