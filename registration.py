@@ -16,11 +16,15 @@ import csv
 from PIL import Image
 import wx
 import wx.xrc
+from rename_dlg import RenameDialog
+
+DAY_NUMBER = 0
+MONTH_NAME = 1
+YEAR_NUMBER = 2
 
 ###########################################################################
 ## Class RegistrationFrame
 ###########################################################################
-
 class RegistrationFrame ( wx.Frame ):
     """
     Displays photos in a scrolled window when a selected directory has met some conditions.
@@ -32,7 +36,6 @@ class RegistrationFrame ( wx.Frame ):
     -When a file is processed it's filename gets decoded and archived in a csv file.
     -The csv file is a basic accounting template.
     """
-
     def __init__( self, *args, **kw ):
         super().__init__( *args, **kw)
 
@@ -42,20 +45,20 @@ class RegistrationFrame ( wx.Frame ):
         self.SetMenuBar( self.rf_mbar )
 
         self.rf_sbar = self.CreateStatusBar( 1, wx.STB_SIZEGRIP, wx.ID_ANY )
+        self.rf_sbar.SetFieldsCount(4)
         rf_main_hbox = wx.BoxSizer( wx.HORIZONTAL )
 
         self.rf_left_pnl = wx.Panel( self, wx.ID_ANY, wx.DefaultPosition, wx.Size( -1,-1 ), wx.TAB_TRAVERSAL )
         rf_left_vbox = wx.BoxSizer( wx.VERTICAL )
 
         self.rf_dirctrl = wx.GenericDirCtrl(
-            self.rf_left_pnl, wx.ID_ANY,
-            "C:/Users/Azael/Documents/Proyectos/Ommega/Contabilidad/Testing Data",
-            wx.DefaultPosition, wx.DefaultSize,
-            wx.DIRCTRL_DIR_ONLY|wx.DIRCTRL_3D_INTERNAL|wx.SUNKEN_BORDER,
-            wx.EmptyString, 0
+            self.rf_left_pnl, wx.ID_ANY, wx.DirDialogDefaultFolderStr,
+            wx.DefaultPosition, wx.DefaultSize, wx.DIRCTRL_DIR_ONLY|wx.DIRCTRL_3D_INTERNAL|
+            wx.SUNKEN_BORDER, wx.EmptyString, 0
         )
 
         self.rf_dirctrl.ShowHidden( False )
+        self.dir_treectrl = self.rf_dirctrl.GetTreeCtrl()
         rf_left_vbox.Add( self.rf_dirctrl, 1, wx.ALL|wx.EXPAND, 5 )
         self.Bind(wx.EVT_DIRCTRL_SELECTIONCHANGED, self.on_directory_changed, self.rf_dirctrl)
 
@@ -104,10 +107,12 @@ class RegistrationFrame ( wx.Frame ):
         self.register_btn = wx.Button( self.rf_actions_pnl, wx.ID_ANY, u"Registrar", wx.DefaultPosition, wx.DefaultSize, 0 )
         rf_actions_vbox.Add( self.register_btn, 1, wx.EXPAND|wx.ALL, 5 )
         self.Bind(wx.EVT_BUTTON, self.on_register, self.register_btn)
+        self.register_btn.Enable(False)
 
         self.ignore_btn = wx.Button( self.rf_actions_pnl, wx.ID_ANY, u"Ignorar", wx.DefaultPosition, wx.DefaultSize, 0 )
         rf_actions_vbox.Add( self.ignore_btn, 1, wx.EXPAND|wx.ALL, 5 )
         self.Bind(wx.EVT_BUTTON, self.on_ignore, self.ignore_btn)
+        self.ignore_btn.Enable(False)
 
         self.rf_actions_pnl.SetSizer( rf_actions_vbox )
         self.rf_actions_pnl.Layout()
@@ -123,16 +128,31 @@ class RegistrationFrame ( wx.Frame ):
         self.Layout()
 
         self.Centre( wx.BOTH )
-
+        ###########################################################################
+        ## Global variables.
+        ###########################################################################
+        self.prev_selected_dir_path = ""
         self.selected_dir_path = ""
         self.selected_dir_name = ""
         self.folder_name_pattern = r"\d{1,2}\s+[a-zA-Z]+\s\d{4}"
         self.file_name_pattern = re.compile(r"(\d{1,3})_(\d{1,2})_([A-V]{1,2})_[B-C]{1}")
+        self.ignored_pattern = r"IGN_.+"
         self.coded_files = []
         self.uncoded_files = []
+        self.ignored_files = []
         self.file_btn_list = []
         self.coded_count = 0
+        self.record_file_path = ""
+        self.record_date = wx.DateTime()
+        self.record_date_str = ""
 
+        ###########################################################################
+        ## Global dictionaries used to:
+        #  Generate coded filenames.
+        #  Decode coded filenames.
+        #  Calculate costs and evaluate record integrity of each
+        #  identification size based on the way the bussines manages them.
+        ###########################################################################
         self.size_dict = {
             "CODING":{
                 "Infantil":"IN", "Pasaporte":"PA", "Credencial Ovalada":"CR",
@@ -172,11 +192,10 @@ class RegistrationFrame ( wx.Frame ):
                 "MIN":4, "DIV":2, "CPP":43.75, "CPO":175.00
             },
             "TI":{
-                "MIN":4, "CPP":55.00, "CPO":220.00
+                "MIN":4, "DIV":2, "CPP":55.00, "CPO":220.00
             }
         }
-        self.record_file_path = ""
-        self.record_date = ""
+
 
 ###########################################################################
 ## Registraion Frame Events.
@@ -187,92 +206,165 @@ class RegistrationFrame ( wx.Frame ):
         Verifies if the new directory name is valid for registration.
         If the selected dir is accepted, scanning of the dir contents is called.
         """
+        if self.rf_dirctrl.GetPath() == "C:\\":
+            return
+
+        self.rf_sbar.SetStatusText("",0)
+        self.rf_sbar.SetStatusText("",1)
+        self.rf_sbar.SetStatusText("",2)
+        self.rf_sbar.SetStatusText("",3)
+
+        # Get the selected dir and dir name.
         self.selected_dir_path = self.rf_dirctrl.GetPath()
         self.selected_dir_name = self.selected_dir_path.split("\\")[-1]
-        # Verify folder's name.
-        folder_match = re.search(self.folder_name_pattern, self.selected_dir_name)
-        if folder_match is  None:
-            # Folder's name is invalid.
-            # Rename folder if the error in the folder's name is minimal.
-            ###########################################################################
-            ## TO DOOOOOOOOOOOOOOOOOOOOOOOOOOO
-            ###########################################################################
-            print("The folder's name is not viable for registration.\n")
-        else:
-             # Folder's name is valid.
-            print(f"The folder's name {self.selected_dir_name} is viable for registration.\n")
-            # Date doesn't change unless folder changes
-            # so we can use the record date as a global variable.
-            aux_date = wx.DateTime()
-            aux_date.ParseDate(self.selected_dir_name)
-            self.record_date = str(aux_date.GetDateOnly()).split(" ")[0]
-            print(f"Date of selected folder: {self.record_date}\n")
 
-            self.record_file_path = (
-                self.selected_dir_path + "\\" +
-                self.selected_dir_name.upper() + ".csv"
-            )
+        if self.verify_dir_name():
+            self.prev_selected_dir_path = self.selected_dir_path
+            self.record_date.ParseDate(self.selected_dir_name)
+            self.record_date_str = str(self.record_date.GetDateOnly()).split(" ")[0]
+            self.rf_sbar.SetStatusText(f"Fecha de carpeta seleccionada -> {self.record_date_str}", 0)
             self.scan_directory()
 
     def on_register(self, event):
         """
-        Check numeration of files already coded and generate new key/s based on them.
+        Register all the files which buttons are toggled.
         """
         photo_quantity = int(self.rf_quantity_ch.GetStringSelection())
         photo_size = self.rf_size_rbox.GetStringSelection()
 
         # Verify integrity of the record to be processed.
         if not self.verify_record(photo_quantity, photo_size):
-            print("Incorrect record data.")
-        else:
-            # Get selected files to register.
-            something_toggled = False
-            for file_btn in self.file_btn_list:
-                if not file_btn.GetValue():
-                    pass
-                else:
-                    something_toggled = True
-                    prev_file_path = self.selected_dir_path + "\\" + file_btn.GetLabel()
-                    if len(self.coded_files) == 0:
-                        self.coded_count = 0
-                    else:
-                        self.coded_count = len(self.coded_files)
-                        # Take into account when a coded file is deleted
-                        ###########################################################################
-                        ## TO DOOOOOOOOOOOOOOOOOOOOOOOOOOO
-                        ###########################################################################
+            msg_dlg = wx.RichMessageDialog(
+                self,
+                "Los datos proporcionados para el registro "
+                "no cumplen con la lógica del establecimiento.",
+                "Error 005.",
+                wx.OK|wx.CENTRE|wx.ICON_ERROR
+            )
+            coded_size = self.size_dict["CODING"][photo_size]
+            minimum = self.costs_dict[coded_size]["MIN"]
+            validator = self.costs_dict[coded_size]["DIV"]
+            msg_dlg.ShowDetailedText(
+                f"Las fotografías de tamaño {photo_size} deben tener una orden mínima de "
+                f"{minimum} y la cantidad total de fotografías debe ser perfectamente "
+                f"divisible entre {validator}."
+            )
+            msg_dlg.ShowModal()
+            return
 
-                    new_file_name = self.generate_code(photo_quantity, photo_size)
-                    new_file_path = self.selected_dir_path + "\\" + new_file_name
+        # Rename files selected.
+        for btn_filename in self.get_selected_filenames():
+            self.coded_count = len(self.coded_files)
+            prev_file_path = self.selected_dir_path + "\\" + btn_filename
+            new_file_name = self.generate_code(photo_quantity, photo_size)
+            new_file_path = self.selected_dir_path + "\\" + new_file_name
+            os.rename(prev_file_path, new_file_path)
 
-                    os.rename(prev_file_path, new_file_path)
-                    # Verify renamed file exists
-                    if not os.path.isfile(new_file_path):
-                        # Processed file NOT FOUND.
-                        ###########################################################################
-                        ## TO DOOOOOOOOOOOOOOOOOOOOOOOOOOO
-                        ###########################################################################
-                        break
-                    else:
-                        self.write_record(new_file_name)
-                        self.coded_files.append(new_file_name)
-
-            if something_toggled:
-                self.clear_file_display()
-                self.scan_directory()
+            # Verify renamed file exists
+            if not os.path.isfile(new_file_path):
+                # Processed file NOT FOUND.
+                break
+            if os.path.isfile(self.record_file_path):
+                # A record file is already in this folder.
+                # What happens if the file already has info on it?
+                pass
             else:
-                print("No files selected.\n")
+                # Generate record CSV template and it's header.
+                month_name = self.record_date.GetMonthName(self.record_date.GetMonth())
+                csv_header = [
+                    [month_name.upper() + " " + str(self.record_date.GetYear())],
+                    ["ESTUDIO FOTOGRÁFICO OMMEGA"],
+                    [" "],
+                    ["FECHA", "CONCEPTO", "IMPORTE"]
+                ]
+                record_file = open(self.record_file_path, mode="w", newline="")
+                record_file_writer = csv.writer(record_file, delimiter=",")
+                record_file_writer.writerows(csv_header)
+                record_file.close()
+
+            self.write_record(new_file_name)
+            self.coded_files.append(new_file_name)
+
+        self.clear_file_display()
+        self.scan_directory()
 
     def on_ignore(self, event):
         """
         ignore_btn button has been pressed.
         """
-        print("Ignorar.\n")
-        print(f"Local month name: {wx.DateTime.GetMonthName(wx.DateTime.Jan)}")
+        # Get Toggled buttons.
+        for btn_filename in self.get_selected_filenames():
+            prev_file_path = self.selected_dir_path + "\\" + btn_filename
+            ignored_filename = "IGN_" + btn_filename
+            ignored_path = self.selected_dir_path + "\\" + ignored_filename
+            os.rename(prev_file_path, ignored_path)
+
+        self.clear_file_display()
+        self.scan_directory()
 
 ###########################################################################
 ## Registration Frame Complementary Methods
 ###########################################################################
+    def verify_dir_name(self):
+        """
+        Verifies the dir name meets the requirements to be archived and allows the user
+        to change the name in case it doesn't.
+        """
+        verified = False
+        folder_match = re.search(self.folder_name_pattern, self.selected_dir_name)
+        if folder_match:
+            # Rename dirname to be capital letters.
+            verified = True
+        else:
+            # Folder's name is invalid.
+            msg_dlg = wx.RichMessageDialog(
+                self,
+                "El nombre de la carpeta seleccionada no cumple con los requisitos para "
+                "ser registrada.\n¿Desea cambiar el nombre de la carpeta?",
+                "Error 001.",
+                wx.YES_NO|wx.CENTRE|wx.ICON_ERROR
+            )
+            msg_dlg.ShowDetailedText(
+                "Ejemplo de nombres de carpeta validos:\n"
+                "01 NOVIEMBRE 1994\n01 FEBRERO 2005\n27 AGOSTO 2010\n\n"
+                f"Carpeta culpable del error:\n{self.selected_dir_name}"
+            )
+
+            # Allow for dir name change.
+            result = msg_dlg.ShowModal()
+            if result == wx.ID_YES:
+                msg_dlg = RenameDialog(None, title="Renombrar carpeta.", size=wx.Size(370,175))
+                result = msg_dlg.ShowModal()
+                if result == wx.ID_OK:
+                    # Assign input date to folder.
+                    try:
+                        new_path = self.selected_dir_path.split("\\")
+                        new_path = new_path[0:len(new_path) -1]
+                        new_path.append(msg_dlg.get_value())
+                        new_path = "\\".join(new_path)
+                        os.rename(self.selected_dir_path, new_path)
+                        #self.rf_dirctrl.SetDefaultPath(new_path)
+                        self.dir_treectrl.AddRoot(new_path)
+                        self.rf_dirctrl.ReCreateTree()
+                    except PermissionError:
+                        exc_dlg = wx.MessageDialog(
+                            self,
+                            "Hubo un error de permiso al renombrar la carpeta.",
+                            "Error 002.",
+                            wx.OK|wx.CENTRE|wx.ICON_ERROR
+                        )
+                        exc_dlg.ShowModal()
+                    except OSError as error:
+                        exc_dlg = wx.MessageDialog(
+                            self,
+                            "Hubo un error al renombrar la carpeta.\n"
+                            f"{error}.",
+                            "Error 003.",
+                            wx.OK|wx.CENTRE|wx.ICON_ERROR
+                        )
+                        exc_dlg.ShowModal()
+        return verified
+
     def clear_file_display(self):
         """
         Destroys scrolled window used as file display and then creates a new one,
@@ -280,7 +372,7 @@ class RegistrationFrame ( wx.Frame ):
         """
         self.file_display_swindow.Destroy()
         self.file_display_swindow = wx.ScrolledWindow( self.rf_right_pnl, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.HSCROLL|wx.VSCROLL )
-        self.file_display_swindow.SetScrollRate( 25, 25 )
+        self.file_display_swindow.SetScrollRate( 30, 30 )
         self.file_display_swindow.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_3DDKSHADOW))
         display_gridbox = wx.GridSizer( 0, 4, 0, 0 )
         self.file_display_swindow.SetSizer( display_gridbox )
@@ -338,8 +430,11 @@ class RegistrationFrame ( wx.Frame ):
 
             try:
                 bmp = wx.Bitmap.FromBuffer(pil_img.size[0], pil_img.size[1], pil_img.tobytes())
-            except Exception as excn:
-                print(f"{excn}\nImage being processed as PNG: {file_path}\n")
+            except ValueError:
+                # Image needs to be saved with PNG format.
+                ###########################################################################
+                ## Investigate for a better solution.
+                ###########################################################################
                 bytes_img = io.BytesIO()
                 pil_img.save(bytes_img, format="PNG")
                 bmp = wx.Bitmap.FromPNGData(bytes_img.getvalue())
@@ -366,45 +461,54 @@ class RegistrationFrame ( wx.Frame ):
         """
         self.uncoded_files.clear()
         self.coded_files.clear()
+        self.ignored_files.clear()
         self.file_btn_list.clear()
-
-        print(f"Path being scanned:\n{self.selected_dir_path}\n")
-
-        print(f"Folder being scanned:\n{self.selected_dir_name}\n")
 
         for walk_tuple in os.walk(self.selected_dir_path):
             if walk_tuple[0] != self.selected_dir_path:
                 # Subfolder being scanned.
-                print("Subfolder detected terminating scan.\n")
                 break
 
-            # Get all jpg files in selected folder ignoring hidden files.
-            os.chdir(walk_tuple[0])
-            #filenames = glob.glob("*.JPG")
-
             # Check for already coded files in folder.
+            os.chdir(walk_tuple[0])
             for filename in glob.glob("*.JPG"):
                 if re.search(self.file_name_pattern, filename):
                     self.coded_files.append(filename)
+                elif re.search(self.ignored_pattern, filename):
+                    self.ignored_files.append(filename)
                 else:
                     self.uncoded_files.append(filename)
-
             self.coded_files.sort()
             self.uncoded_files.sort()
+            self.ignored_files.sort()
 
-            print(f"Coded files found: {len(self.coded_files)}\n{self.coded_files}\n")
-            print(f"Uncoded files found: {len(self.uncoded_files)}\n{self.uncoded_files}\n")
+            self.rf_sbar.SetStatusText(f"Elementos registrados -> {len(self.coded_files)}", 1)
+            self.rf_sbar.SetStatusText(f"Elementos pendientes -> {len(self.uncoded_files)}", 2)
+            self.rf_sbar.SetStatusText(f"Elementos ignorados -> {len(self.ignored_files)}", 3)
 
             if len(self.uncoded_files) == 0:
-                print("All the files in this folder have been processed already.")
+                msg_dlg = wx.RichMessageDialog(
+                    self,
+                    "No hay elementos pendientes por registrar en esta carpeta.",
+                    "Carpeta registrada.",
+                    wx.OK|wx.CENTRE|wx.ICON_INFORMATION
+                )
+                msg_dlg.ShowModal()
             else:
+                # Establish the full file path of the record.
+                self.record_file_path = (
+                    self.selected_dir_path + "\\" +
+                    self.selected_dir_name.upper() + ".csv"
+                )
                 self.generate_bitmap_buttons()
+                self.register_btn.Enable(True)
+                self.ignore_btn.Enable(True)
 
     def verify_record(self, photo_quantity, photo_size):
+
         """
         Verifies the record to be archived meets the logical requirements of it's nature.
         """
-        print("Verifying record parameters...\n")
         verified = False
         if photo_size == "Infantil":
             if (photo_quantity >= self.costs_dict["IN"]["MIN"] and
@@ -426,12 +530,31 @@ class RegistrationFrame ( wx.Frame ):
                 photo_quantity % self.costs_dict["VI"]["DIV"] == 0):
                 verified = True
 
-        elif photo_size == "Diploma" or photo_size == "Título":
+        elif photo_size in "Diploma" or "Título":
             if (photo_quantity >= self.costs_dict["DI"]["MIN"] and
                 photo_quantity % self.costs_dict["DI"]["DIV"] == 0):
                 verified = True
 
         return verified
+
+    def get_selected_filenames(self):
+        """
+        Returns the paths corresponding to the buttons that are currently toggled.
+        """
+        toggled_labels = []
+        for file_btn in self.file_btn_list:
+            if file_btn.GetValue():
+                toggled_labels.append(file_btn.GetLabel())
+
+        if len(toggled_labels) == 0:
+            msg_dlg = wx.RichMessageDialog(
+                self,
+                "No se ha seleccionado ninguna imagen para realizar el reporte.",
+                "Error 004.",
+                wx.OK|wx.CENTRE|wx.ICON_ERROR
+            )
+            msg_dlg.ShowModal()
+        return toggled_labels
 
     def generate_code(self, photo_quantity, photo_size):
         """
@@ -464,9 +587,7 @@ class RegistrationFrame ( wx.Frame ):
             self.color_dict["DECODING"][coded_color],
             self.size_dict["DECODING"][coded_size]
         ]
-        print(f"Filename {new_file_name} has been decoded:\n{decoded_name_param}\n")
         concept = " ".join(decoded_name_param)
-        print(f"Concept cell content generated:\n{concept}\n")
 
         # Calculate the amount.
         ind_cost = self.costs_dict[coded_size]["CPP"]
@@ -482,27 +603,34 @@ class RegistrationFrame ( wx.Frame ):
                 float(self.costs_dict[coded_size]["MIN"]) *
                 self.costs_dict[coded_size]["CPO"]
             )
-        amount = "$" + str(amount)
-        print(f"Amount cell content generated:\n{amount}\n")
-        # CSV Accounting template:
-        # _,      MES + " " + AÑO
-        # _,  ESTUDIO FOTOGRÁFICO OMEGA
-        # _,FECHA,        CONCEPTO,               IMPORTE
-        # _,DD/MM/AAA,    6 COLOR INFANTIL,       $70.00
-        # _,_,            VENTA TOTAL DEL DÍA,    $70.00
+        amount = str(amount)
 
-        # Check if csv file is already created.
-        if os.path.isfile(self.record_file_path):
-            # Record file already exists.
-            mode = "a"
-        else:
-            # Record file doesn't exist.
-            mode = "w"
+        # Write csv_row to csv file.
+        csv_row = [
+            self.record_date_str,
+            concept,
+            amount
+        ]
 
-        record_file = open(f"{self.selected_dir_name}.csv", mode=mode, newline="")
-        record_file_writer = csv.writer(record_file, delimiter=",")
-        record_file_writer.writerow([self.record_date, concept, amount])
-        record_file.close()
+        while True:
+            try:
+                record_file = open(self.record_file_path, mode="a", newline="")
+                record_file_writer = csv.writer(record_file, delimiter=",")
+                record_file_writer.writerow(csv_row)
+                record_file.close()
+                break
+            except PermissionError:
+                msg_dlg = wx.RichMessageDialog(
+                    self,
+                    "El archivo de reporte generado se encuentra abierto.",
+                    "Error 006.",
+                    wx.OK|wx.CENTRE|wx.ICON_ERROR
+                )
+                msg_dlg.ShowDetailedText(
+                    "La hoja de cálculo a la cual se envía la información del reporte "
+                    "necesita estar cerrada mientras se registran imágenes."
+                )
+                msg_dlg.ShowModal()
 
     def __del__( self ):
         """

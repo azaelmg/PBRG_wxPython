@@ -10,7 +10,7 @@ if __name__ == '__main__':
     app = wx.App()
 
     # Create a frame.
-    frame = registration.RegistrationFrame(None, title= "Photo Accounting")
+    frame = registration.RegistrationFrame(None, title="Photo Accounting")
 
     # Show the frame.
     frame.Show()
