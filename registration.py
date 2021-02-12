@@ -42,6 +42,13 @@ class RegistrationFrame ( wx.Frame ):
         self.SetSizeHints( wx.DefaultSize, wx.DefaultSize )
 
         self.rf_mbar = wx.MenuBar( 0 )
+        self.file_mnu = wx.Menu()
+        self.select_root_mitm = wx.MenuItem( self.file_mnu, wx.ID_ANY, u"Seleccionar Raíz", wx.EmptyString, wx.ITEM_NORMAL )
+        self.file_mnu.Append( self.select_root_mitm )
+        self.Bind(wx.EVT_MENU, self.on_select_root, self.select_root_mitm)
+
+        self.rf_mbar.Append( self.file_mnu, u"Archivo" )
+
         self.SetMenuBar( self.rf_mbar )
 
         self.rf_sbar = self.CreateStatusBar( 1, wx.STB_SIZEGRIP, wx.ID_ANY )
@@ -134,7 +141,7 @@ class RegistrationFrame ( wx.Frame ):
         self.prev_selected_dir_path = ""
         self.selected_dir_path = ""
         self.selected_dir_name = ""
-        self.folder_name_pattern = r"\d{1,2}\s+[a-zA-Z]+\s\d{4}"
+        self.folder_name_pattern = r"\d{2}\s+[a-zA-Z]+\s\d{4}"
         self.file_name_pattern = re.compile(r"(\d{1,3})_(\d{1,2})_([A-V]{1,2})_[B-C]{1}")
         self.ignored_pattern = r"IGN_.+"
         self.coded_files = []
@@ -196,10 +203,28 @@ class RegistrationFrame ( wx.Frame ):
             }
         }
 
-
 ###########################################################################
 ## Registraion Frame Events.
 ###########################################################################
+    def on_select_root(self, event):
+        """
+        Selects a root node for the dir ctrl via dir dialog.
+        Made to ease the finding of folders containing photos.
+        """
+        dir_dlg = wx.DirDialog(
+            self, "Selecciona la carpeta principal.", wx.DirDialogDefaultFolderStr,
+            wx.DD_DIR_MUST_EXIST|wx.RESIZE_BORDER, wx.DefaultPosition, wx.DefaultSize
+        )
+        result = dir_dlg.ShowModal()
+
+        if result == wx.ID_OK:
+            chosen_root = dir_dlg.GetPath()
+            self.rf_dirctrl.SetDefaultPath(chosen_root)
+            self.rf_dirctrl.CollapseTree()
+            self.rf_dirctrl.ExpandPath(chosen_root)
+        elif result == wx.ID_CANCEL:
+            return
+
     def on_directory_changed(self, event):
         """
         Selected directory has changed.
@@ -305,6 +330,8 @@ class RegistrationFrame ( wx.Frame ):
 ###########################################################################
 ## Registration Frame Complementary Methods
 ###########################################################################
+    #def create
+
     def verify_dir_name(self):
         """
         Verifies the dir name meets the requirements to be archived and allows the user
@@ -343,9 +370,9 @@ class RegistrationFrame ( wx.Frame ):
                         new_path.append(msg_dlg.get_value())
                         new_path = "\\".join(new_path)
                         os.rename(self.selected_dir_path, new_path)
-                        #self.rf_dirctrl.SetDefaultPath(new_path)
-                        self.dir_treectrl.AddRoot(new_path)
-                        self.rf_dirctrl.ReCreateTree()
+                        self.rf_dirctrl.SetDefaultPath(new_path)
+                        self.rf_dirctrl.CollapseTree()
+                        self.rf_dirctrl.ExpandPath(new_path)
                     except PermissionError:
                         exc_dlg = wx.MessageDialog(
                             self,
@@ -362,7 +389,7 @@ class RegistrationFrame ( wx.Frame ):
                             "Error 003.",
                             wx.OK|wx.CENTRE|wx.ICON_ERROR
                         )
-                        exc_dlg.ShowModal()
+            msg_dlg.Destroy()
         return verified
 
     def clear_file_display(self):
@@ -505,7 +532,6 @@ class RegistrationFrame ( wx.Frame ):
                 self.ignore_btn.Enable(True)
 
     def verify_record(self, photo_quantity, photo_size):
-
         """
         Verifies the record to be archived meets the logical requirements of it's nature.
         """
@@ -636,4 +662,4 @@ class RegistrationFrame ( wx.Frame ):
         """
         Destructor for Registration frame.
         """
-        print("Deleting Registration Frame.\n")
+        pass

@@ -92,10 +92,11 @@ class RenameDialog ( wx.Dialog ):
         self.accept_btn = wx.Button( self, wx.ID_OK)
         self.accept_btn.SetDefault()
         actions_hbox.Add( self.accept_btn, 1, wx.ALL, 5 )
+        self.Bind(wx.EVT_BUTTON, self.on_accept, self.accept_btn)
 
         self.cancel_btn = wx.Button( self, wx.ID_CANCEL)
-        self.cancel_btn.SetDefault()
         actions_hbox.Add( self.cancel_btn, 1, wx.ALL, 5 )
+        self.Bind(wx.EVT_BUTTON, self.on_cancel, self.cancel_btn)
 
 
         main_vbox.Add( actions_hbox, 0, wx.EXPAND, 5 )
@@ -120,7 +121,7 @@ class RenameDialog ( wx.Dialog ):
         ]
         return " ".join(date)
 
-    def OnOk(self, event):
+    def on_accept(self, event):
         """
         Called on btn OK inside the dialog.
         """
@@ -131,5 +132,15 @@ class RenameDialog ( wx.Dialog ):
                 self.SetReturnCode(wx.ID_OK)
                 self.Show(False)
 
+    def on_cancel(self, event):
+        if self.IsModal():
+            self.EndModal(wx.ID_CANCEL)
+        else:
+            self.SetReturnCode(wx.ID_CANCEL)
+            self.Show(False)
+
     def __del__( self ):
+        """
+        Destructors
+        """
         pass
